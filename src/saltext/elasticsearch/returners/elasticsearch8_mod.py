@@ -726,7 +726,7 @@ def save_load(jid, load, minions=None):
             else:
                 add_to_cache = True
         else:
-            log.debug(f"save_load cmd in load but it is neither _return nor publish {jid}: {cmd}")
+            log.debug(f"save_load cmd in load but it is neither _return nor publish {jid}: {load['cmd']}")
             log.trace(f"save_load load {load}")
     else:
         log.debug(f"save_load cmd not in load, attempting to load job to cache")
@@ -859,13 +859,13 @@ def get_fun(fun):
     index =  _get_index_name(fun, options["dev"])
     query = FUNCTION_QUERY
     data = __salt__["elasticsearch.search"](index=index, body=query, size=10000)
-    return data.body['hits']['hits']
+    return data['hits']['hits']
 
 def get_minions():
     log.debug("running get_minions")
     options = _get_options()
-    index =  _get_index_name(fun, options["dev"])
+    index = options["master_job_cache_index"]
     query = MINION_QUERY
     data = __salt__["elasticsearch.search"](index=index, body=query, size=10000)
-    return [m['key'] for m in  data.body['aggregations']['unique_field_values']['buckets']]
+    return [m['key'] for m in  data['aggregations']['unique_field_values']['buckets']]
 

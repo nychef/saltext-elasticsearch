@@ -1,7 +1,7 @@
 """
 Return data to an elasticsearch server for indexing.
 
-Copied from original returner and modified to support elasticsearch 6.x
+Copied from original returner and modified to support elasticsearch 8.x
 
 Original maintainers: Jurnell Cockhren <jurnell.cockhren@sophicware.com>, Arnold Bechtoldt <mail@arnoldbechtoldt.com>
 
@@ -325,15 +325,19 @@ def _load_modules_ssh(__salt__):
                 "elasticsearch.search"]:
         if f not in __salt__:
             if not loaded:
-                import saltext.elasticsearch.modules.elasticsearch6_mod
+                import saltext.elasticsearch.modules.elasticsearch8_mod
                 loaded = True
-                saltext.elasticsearch.modules.elasticsearch6_mod.__salt__ = __salt__
-            __salt__[f] = eval(f"saltext.elasticsearch.modules.elasticsearch6_mod.{f.split('.')[1]}")
+                saltext.elasticsearch.modules.elasticsearch8_mod.__salt__ = __salt__
+            __salt__[f] = eval(f"saltext.elasticsearch.modules.elasticsearch8_mod.{f.split('.')[1]}")
     __salt__["config.option"] = salt.modules.config.option 
 
 
 try:
-    import elasticsearch8 as elasticsearch
+    try:
+        import elasticsearch8 as elasticsearch
+    except ImportError:
+        import elasticsearch
+
     HAS_ELASTICSEARCH = True
     ES_MAJOR_VERSION = elasticsearch.__version__[0]
     logging.getLogger("elasticsearch").setLevel(logging.CRITICAL)
@@ -359,11 +363,8 @@ def __virtual__():
             False,
             "Cannot load module elasticsearch: elasticsearch librarielastic not found",
         )
-    if ES_MAJOR_VERSION >= 8:
-        return (
-            False,
-            "Cannot load module elasticsearch: elasticsearch library version is 8+",
-        )
+    if ES_MAJOR_VERSION < 8:
+        return (False, "Cannot load the module, elasticserach version is not 8+")
 
     return __virtualname__
 
@@ -725,7 +726,7 @@ def save_load(jid, load, minions=None):
             else:
                 add_to_cache = True
         else:
-            log.debug(f"save_load cmd in load but it is neither _return nor publish {jid}: {cmd}")
+            log.debug(f"save_load cmd in load but it is neither _return nor publish {jid}: {load['cmd']}")
             log.trace(f"save_load load {load}")
     else:
         log.debug(f"save_load cmd not in load, attempting to load job to cache")
@@ -858,13 +859,13 @@ def get_fun(fun):
     index =  _get_index_name(fun, options["dev"])
     query = FUNCTION_QUERY
     data = __salt__["elasticsearch.search"](index=index, body=query, size=10000)
-    return data.body['hits']['hits']
+    return data['hits']['hits']
 
 def get_minions():
     log.debug("running get_minions")
     options = _get_options()
-    index =  _get_index_name(fun, options["dev"])
+    index = options["master_job_cache_index"]
     query = MINION_QUERY
     data = __salt__["elasticsearch.search"](index=index, body=query, size=10000)
-    return [m['key'] for m in  data.body['aggregations']['unique_field_values']['buckets']]
+    return [m['key'] for m in  data['aggregations']['unique_field_values']['buckets']]
 
