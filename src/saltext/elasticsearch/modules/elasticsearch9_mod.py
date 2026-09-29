@@ -63,7 +63,7 @@ from salt.exceptions import SaltInvocationError
 log = logging.getLogger(__name__)
 
 try:
-    import elasticsearch
+    import elasticsearch8 as elasticsearch
     from elastic_transport import RequestsHttpNode
 
     HAS_ELASTICSEARCH = True
@@ -1283,6 +1283,53 @@ def document_get(
     except elasticsearch.TransportError as err:
         raise CommandExecutionError(
             f"Cannot retrieve document {id} from index {index}, server returned errors {err.errors}"
+        ) from err
+
+
+def document_get_all(
+    index,
+    hosts=None,
+    profile=None,
+    error_trace=None,
+    filter_path=None,
+    human=None,
+    preference=None,
+    pretty=None,
+    realtime=None,
+    refresh=None,
+    routing=None,
+    source=None,
+    source_excludes=None,
+    source_includes=None,
+    stored_fields=None,
+    version=None,
+    version_type=None,
+):
+    """
+    Get all documents in an index
+
+    index
+        Index name where the document resides
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion elasticsearch.document_get_all testindex
+    """
+    elastic = _get_instance(hosts=hosts, profile=profile)
+
+    try:
+        return elastic.search(
+            index=index,
+            source_excludes=source_excludes,
+            body={"size": 10000, "sort": [{"@timestamp": {"order": "desc"}}], "query": {"match_all": {}}},
+        ).body["hits"]
+    except elasticsearch.exceptions.NotFoundError:
+        return None
+    except elasticsearch.TransportError as err:
+        raise CommandExecutionError(
+            f"Cannot retrieve documents from index {index}, server returned errors {err.errors}"
         ) from err
 
 

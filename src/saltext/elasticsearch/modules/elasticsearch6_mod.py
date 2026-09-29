@@ -59,7 +59,7 @@ from salt.exceptions import CommandExecutionError
 from salt.exceptions import SaltInvocationError
 
 try:
-    import elasticsearch
+    import elasticsearch8 as elasticsearch
     from elasticsearch import RequestsHttpConnection
 
     HAS_ELASTICSEARCH = True
@@ -497,20 +497,24 @@ def alias_get(indices=None, aliases=None, hosts=None, profile=None):
         )
 
 
-def document_create(index, doc_type, body=None, id=None, hosts=None, profile=None, source=None):
+def document_create(index, doc_type=None, body=None, id=None, id_=None, document=None, hosts=None, profile=None, source=None):
     """
     Create a document in a specified index
 
     index
         Index name where the document should reside
     doc_type
-        Type of the document
+        Type of the document (defaults to _doc when omitted)
     body
         Document to store
+    document
+        Alias for body (ES8-style parameter name)
     source
         URL of file specifying document to store. Cannot be used in combination with ``body``.
     id
         Optional unique document identifier for specified doc_type (empty for random)
+    id_
+        Alias for id (ES8-style parameter name)
 
     CLI Example:
 
@@ -519,6 +523,12 @@ def document_create(index, doc_type, body=None, id=None, hosts=None, profile=Non
         salt myminion elasticsearch.document_create testindex doctype1 '{}'
     """
     es = _get_instance(hosts, profile)
+    if id_ is not None:
+        id = id_
+    if document is not None:
+        body = document
+    if doc_type is None:
+        doc_type = "_doc"
     if source and body:
         message = "Either body or source should be specified but not both."
         raise SaltInvocationError(message)
@@ -563,7 +573,7 @@ def document_delete(index, doc_type, id, hosts=None, profile=None):
         )
 
 
-def document_exists(index, id, doc_type="_all", hosts=None, profile=None):
+def document_exists(index, id=None, id_=None, doc_type="_all", hosts=None, profile=None):
     """
     Return a boolean indicating whether given document exists
 
@@ -571,6 +581,8 @@ def document_exists(index, id, doc_type="_all", hosts=None, profile=None):
         Index name where the document resides
     id
         Document identifier
+    id_
+        Alias for id (ES8-style parameter name)
     doc_type
         Type of the document, use _all to fetch the first document matching the ID across all types
 
@@ -581,6 +593,8 @@ def document_exists(index, id, doc_type="_all", hosts=None, profile=None):
         salt myminion elasticsearch.document_exists testindex AUx-384m0Bug_8U80wQZ
     """
     es = _get_instance(hosts, profile)
+    if id_ is not None:
+        id = id_
 
     try:
         return es.exists(index=index, id=id, doc_type=doc_type)
@@ -593,7 +607,7 @@ def document_exists(index, id, doc_type="_all", hosts=None, profile=None):
         )
 
 
-def document_get(index, id, doc_type="_all", hosts=None, profile=None):
+def document_get(index, id=None, id_=None, doc_type="_all", hosts=None, profile=None, source_excludes=None):
     """
     Check for the existence of a document and if it exists, return it
 
@@ -601,8 +615,12 @@ def document_get(index, id, doc_type="_all", hosts=None, profile=None):
         Index name where the document resides
     id
         Document identifier
+    id_
+        Alias for id (ES8-style parameter name)
     doc_type
         Type of the document, use _all to fetch the first document matching the ID across all types
+    source_excludes
+        Accepted for ES8-style call compatibility; not applied by the ES6 client
 
     CLI Example:
 
@@ -611,6 +629,8 @@ def document_get(index, id, doc_type="_all", hosts=None, profile=None):
         salt myminion elasticsearch.document_get testindex AUx-384m0Bug_8U80wQZ
     """
     es = _get_instance(hosts, profile)
+    if id_ is not None:
+        id = id_
 
     try:
         return es.get(index=index, id=id, doc_type=doc_type)
@@ -623,7 +643,110 @@ def document_get(index, id, doc_type="_all", hosts=None, profile=None):
         )
 
 
-def index_create(index, body=None, hosts=None, profile=None, source=None):
+def document_update(index, id_=None, body=None, hosts=None, profile=None, source=None):
+    """
+    Update a document in a specified index
+
+    index
+        Index name where the document resides
+    id_
+        Document identifier
+    body
+        The update definition (script, doc, upsert, etc.)
+    source
+        URL to file specifying the update definition. Cannot be used in combination with ``body``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion elasticsearch.document_update testindex AUx-384m0Bug_8U80wQZ '{"doc": {"field": "value"}}'
+    """
+    es = _get_instance(hosts, profile)
+    if source:
+        body = __salt__["cp.get_file_str"](source, saltenv=__opts__.get("saltenv", "base"))
+    try:
+        return es.update(index=index, doc_type="_doc", id=id_, body=body)
+    except elasticsearch.TransportError as e:
+        raise CommandExecutionError(
+            "Cannot update document {} in index {}, server returned code {} with"
+            " message {}".format(id_, index, e.status_code, e.error)
+        )
+
+
+def document_get_all(index, source_excludes=None, hosts=None, profile=None):
+    """
+    Get all documents in an index
+
+    index
+        Index name where the documents reside
+    source_excludes
+        Accepted for ES8-style call compatibility; not applied by the ES6 client
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion elasticsearch.document_get_all testindex
+    """
+    es = _get_instance(hosts, profile)
+
+    try:
+        return es.search(
+            index=index,
+            body={"size": 10000, "sort": [{"@timestamp": {"order": "desc"}}], "query": {"match_all": {}}},
+        )["hits"]
+    except elasticsearch.exceptions.NotFoundError:
+        return None
+    except elasticsearch.TransportError as e:
+        raise CommandExecutionError(
+            "Cannot retrieve documents from index {}, server returned code {} with"
+            " message {}".format(index, e.status_code, e.error)
+        )
+
+
+def search(index=None, body=None, size=None, q=None, hosts=None, profile=None, source_excludes=None):
+    """
+    Run an Elasticsearch query and return the raw result
+
+    index
+        Index name to search (or comma-separated list); omitted for cluster-wide search
+    body
+        The search definition (query, aggregations, sort, etc.)
+    size
+        Number of hits to return (merged into body)
+    q
+        Query in the Lucene query string syntax
+    source_excludes
+        Accepted for ES8-style call compatibility; not applied by the ES6 client
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt myminion elasticsearch.search index=testindex body='{"query": {"match_all": {}}}'
+    """
+    es = _get_instance(hosts, profile)
+    if size is not None or source_excludes is not None or q is not None:
+        body = body or {}
+        if size is not None:
+            body["size"] = size
+        if source_excludes is not None:
+            body["_source_exclude"] = source_excludes
+        if q is not None:
+            body["query"] = {"query_string": {"query": q}}
+    try:
+        return es.search(index=index, body=body)
+    except elasticsearch.exceptions.NotFoundError:
+        return None
+    except elasticsearch.TransportError as e:
+        raise CommandExecutionError(
+            "Cannot execute search on index {}, server returned code {} with"
+            " message {}".format(index, e.status_code, e.error)
+        )
+
+
+def index_create(index, body=None, settings=None, mappings=None, hosts=None, profile=None, source=None):
     """
     Create an index
 
@@ -631,6 +754,10 @@ def index_create(index, body=None, hosts=None, profile=None, source=None):
         Index name
     body
         Index definition, such as settings and mappings as defined in https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-create-index.html
+    settings
+        Index settings (ES8-style parameter; merged into body)
+    mappings
+        Index mappings (ES8-style parameter; merged into body)
     source
         URL to file specifying index definition. Cannot be used in combination with ``body``.
 
@@ -642,6 +769,12 @@ def index_create(index, body=None, hosts=None, profile=None, source=None):
         salt myminion elasticsearch.index_create testindex2 '{"settings" : {"index" : {"number_of_shards" : 3, "number_of_replicas" : 2}}}'
     """
     es = _get_instance(hosts, profile)
+    if settings is not None or mappings is not None:
+        body = body or {}
+        if settings is not None:
+            body["settings"] = settings
+        if mappings is not None:
+            body["mappings"] = mappings
     if source and body:
         message = "Either body or source should be specified but not both."
         raise SaltInvocationError(message)
